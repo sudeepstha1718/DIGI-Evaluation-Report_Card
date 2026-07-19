@@ -944,20 +944,11 @@ export default function App() {
     return () => clearTimeout(delayDebounceFn);
   }, [students, schoolName, schoolMotto, schoolLogo, ALLOWED_CLASSES, ALLOWED_BATCHES, isServerSynced, hasUnsaved]);
 
-  // Listen to browser-wide online/offline events to immediately update offline indicator
+  // In sandboxed iframe environments (like Google AI Studio preview), window online/offline events and
+  // navigator.onLine can be unreliable and trigger false-positives. We rely purely on actual backend 
+  // API handshake success or failure to determine database offline/online status, ensuring high resilience.
   useEffect(() => {
-    const handleOnline = () => setIsOffline(false);
-    const handleOffline = () => setIsOffline(true);
-    if (typeof window !== "undefined") {
-      window.addEventListener("online", handleOnline);
-      window.addEventListener("offline", handleOffline);
-    }
-    return () => {
-      if (typeof window !== "undefined") {
-        window.removeEventListener("online", handleOnline);
-        window.removeEventListener("offline", handleOffline);
-      }
-    };
+    // We do not bind window 'online' / 'offline' event listeners here to prevent sandbox false positives.
   }, []);
 
   // Background self-healing image compressor:
