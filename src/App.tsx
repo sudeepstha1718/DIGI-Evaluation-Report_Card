@@ -493,12 +493,7 @@ export default function App() {
 
   const [isServerSynced, setIsServerSynced] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [isOffline, setIsOffline] = useState(() => {
-    if (typeof window !== "undefined") {
-      return !navigator.onLine;
-    }
-    return false;
-  });
+  const [isOffline, setIsOffline] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(() => {
     return typeof window !== "undefined" ? localStorage.getItem("edugrade_last_sync_time") : null;
   });
