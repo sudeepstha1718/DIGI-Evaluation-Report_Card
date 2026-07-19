@@ -549,11 +549,15 @@ export default function App() {
   const [isServerSynced, setIsServerSynced] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
+  const [dbSource, setDbSource] = useState<"cloud" | "local" | null>(null);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(() => {
     return typeof window !== "undefined" ? localStorage.getItem("edugrade_last_sync_time") : null;
   });
 
   const applyPulledData = (payload: any, silent = false) => {
+    if (payload.source) {
+      setDbSource(payload.source);
+    }
     if (payload.students && payload.students.length > 0) {
       setStudents(payload.students);
       localStorage.setItem("edugrade_students", JSON.stringify(payload.students));
@@ -603,6 +607,9 @@ export default function App() {
       }
       const data = await res.json();
       setIsOffline(false);
+      if (data.source) {
+        setDbSource(data.source);
+      }
       if (data.initialized) {
         const fetchedStudents = data.students || [];
         const localStudents = students;
@@ -784,6 +791,11 @@ export default function App() {
       }
       const data = await res.json();
       setIsOffline(false);
+      if (data.savedToCloud) {
+        setDbSource("cloud");
+      } else {
+        setDbSource("local");
+      }
       if (data.success) {
         const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         setLastSyncTime(timeStr);
@@ -849,6 +861,11 @@ export default function App() {
           const initData = await initRes.json();
           if (initData.success) {
             setIsOffline(false);
+            if (initData.savedToCloud) {
+              setDbSource("cloud");
+            } else {
+              setDbSource("local");
+            }
           }
           const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
           setLastSyncTime(timeStr);
@@ -2679,10 +2696,15 @@ export default function App() {
                   <WifiOff className="h-2.5 w-2.5" />
                   Offline Mode
                 </span>
-              ) : (
-                <span className="inline-flex items-center gap-1 bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/30 text-[9px] font-extrabold tracking-wider uppercase">
+              ) : dbSource === "cloud" ? (
+                <span className="inline-flex items-center gap-1 bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/30 text-[9px] font-extrabold tracking-wider uppercase" title="Stored securely on Internet Cloud DB">
                   <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  Cloud Sync Active
+                  🌐 Internet DB Connected
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full border border-amber-500/30 text-[9px] font-extrabold tracking-wider uppercase" title="Stored on Local Server Backup (data_store.json). Click 'Cloud Database Setup' to hook up your free DB.">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400" />
+                  📁 Local Backup Only
                 </span>
               )}
             </p>
@@ -2755,6 +2777,19 @@ export default function App() {
           >
             <Settings className="h-3.5 w-3.5 text-amber-500" />
             <span>🏫 School Logo & Branding</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setWorkspaceTab("database")}
+            className={`flex-1 sm:flex-initial px-5 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+              workspaceTab === "database" 
+                ? "bg-slate-900 text-white shadow-md shadow-slate-900/15 border border-slate-900" 
+                : "bg-slate-50 text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-slate-200"
+            }`}
+          >
+            <Cloud className="h-3.5 w-3.5 text-cyan-500 animate-pulse" />
+            <span>🌐 Cloud Database Setup</span>
           </button>
 
           <div className="h-6 w-[1px] bg-slate-250 mx-1 hidden xl:block" />
@@ -3055,6 +3090,145 @@ export default function App() {
                 </div>
               </div>
               
+            </div>
+          </div>
+        )}
+
+        {workspaceTab === "database" && (
+          <div className="absolute inset-x-0 top-0 bottom-0 bg-slate-50/90 backdrop-blur-xs overflow-y-auto p-4 sm:p-6 md:p-8 z-30 flex justify-center items-start print:hidden">
+            <div className="w-full max-w-4xl space-y-6">
+              
+              {/* Database Status Alert Card */}
+              <div className="p-5 rounded-2xl bg-slate-900 text-white border border-slate-800 shadow-xl">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                  <div>
+                    <h3 className="font-extrabold text-sm sm:text-base tracking-tight flex items-center gap-2 text-cyan-400">
+                      <Cloud className="h-5 w-5" />
+                      <span>Cloud Database & Storage Hub</span>
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-1 max-w-xl leading-relaxed">
+                      EduGrade stores your student records, marks, and evaluations on both local server disk and secure remote databases to ensure you never lose a single grade mark.
+                    </p>
+                  </div>
+                  
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setWorkspaceTab("editor")}
+                      className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-extrabold text-xs px-4 py-2.5 rounded-xl transition-all cursor-pointer shrink-0"
+                    >
+                      Back to Editor
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => pullDataFromServer(false)}
+                      disabled={isSyncing}
+                      className="bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl transition-all cursor-pointer shrink-0 flex items-center gap-1.5"
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 ${isSyncing ? "animate-spin" : ""}`} />
+                      <span>Sync Now</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-5 pt-4 border-t border-slate-800 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="bg-slate-950/40 rounded-xl p-3 border border-slate-800/40">
+                    <span className="text-[10px] uppercase font-black tracking-widest text-slate-500 block">Current Storage State</span>
+                    <div className="flex items-center gap-2 mt-1.5">
+                      {dbSource === "cloud" ? (
+                        <span className="inline-flex items-center gap-1.5 bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-full border border-emerald-500/30 text-xs font-bold uppercase tracking-wide">
+                          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                          🌐 Connected to Internet Cloud DB
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 bg-amber-500/20 text-amber-300 px-3 py-1 rounded-full border border-amber-500/30 text-xs font-bold uppercase tracking-wide">
+                          <span className="w-2 h-2 rounded-full bg-amber-400" />
+                          📁 Local Server File Backup Only
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-950/40 rounded-xl p-3 border border-slate-800/40">
+                    <span className="text-[10px] uppercase font-black tracking-widest text-slate-500 block">Last Database Push/Pull Sync</span>
+                    <p className="text-sm font-semibold text-slate-300 mt-1">
+                      {lastSyncTime ? `Today, ${lastSyncTime}` : "Not synchronized yet"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* 100% Free Database Instructions */}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="bg-slate-50 px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
+                      <GraduationCap className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-sm text-slate-900">Get 100% Free Cloud Storage with NO Credit Card</h4>
+                      <p className="text-[11px] text-slate-500 mt-0.5">Highly reliable remote databases to persist your grades in Vercel or any other cloud</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-6 space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    
+                    {/* Option 1: Neon.tech / Supabase */}
+                    <div className="border border-slate-150 rounded-xl p-5 hover:border-blue-200 transition-all space-y-4">
+                      <div className="flex items-center gap-2">
+                        <span className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 font-black text-xs flex items-center justify-center border border-emerald-100">1</span>
+                        <h5 className="font-bold text-xs uppercase tracking-wider text-slate-700">Option A: Postgres (Neon / Supabase)</h5>
+                      </div>
+                      <p className="text-xs text-slate-500 leading-relaxed">
+                        <strong>Neon.tech</strong> and <strong>Supabase</strong> provide robust, instant Postgres SQL databases. Their free tiers are fully compliant with EduGrade and do <strong>not</strong> require any credit card information.
+                      </p>
+                      
+                      <div className="space-y-2">
+                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Instructions:</span>
+                        <ol className="text-[11px] text-slate-600 space-y-1.5 list-decimal list-inside pl-1 leading-relaxed">
+                          <li>Go to <a href="https://neon.tech" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline font-bold inline-flex items-center gap-0.5">neon.tech <ExternalLink className="h-3 w-3 inline" /></a> and register with GitHub or Google.</li>
+                          <li>Create a new project (select the serverless free tier).</li>
+                          <li>Copy the primary connection string (starts with <code>postgres://</code> or <code>postgresql://</code>).</li>
+                          <li>Add the environment variable name <strong>DATABASE_URL</strong> in your Vercel deployment project settings and paste your copied connection string.</li>
+                        </ol>
+                      </div>
+                    </div>
+
+                    {/* Option 2: Upstash Redis */}
+                    <div className="border border-slate-150 rounded-xl p-5 hover:border-blue-200 transition-all space-y-4">
+                      <div className="flex items-center gap-2">
+                        <span className="w-7 h-7 rounded-lg bg-cyan-50 text-cyan-600 font-black text-xs flex items-center justify-center border border-cyan-100">2</span>
+                        <h5 className="font-bold text-xs uppercase tracking-wider text-slate-700">Option B: Vercel KV / Upstash</h5>
+                      </div>
+                      <p className="text-xs text-slate-500 leading-relaxed">
+                        If you want an extremely fast key-value REST storage, you can use Vercel's integrated <strong>KV storage</strong> (powered by Upstash Redis) which is free for personal use.
+                      </p>
+
+                      <div className="space-y-2">
+                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Instructions:</span>
+                        <ol className="text-[11px] text-slate-600 space-y-1.5 list-decimal list-inside pl-1 leading-relaxed">
+                          <li>Go to your Vercel Project Dashboard.</li>
+                          <li>Click on the <strong>Storage</strong> tab.</li>
+                          <li>Select <strong>KV (Redis)</strong>, click "Create" and link it to your project. Vercel will automatically inject <strong>KV_REST_API_URL</strong> and <strong>KV_REST_API_TOKEN</strong>!</li>
+                          <li>Redeploy your project, and EduGrade will automatically detect and sync records instantly.</li>
+                        </ol>
+                      </div>
+                    </div>
+
+                  </div>
+
+                  {/* Troubleshooting Tip Card */}
+                  <div className="p-4 rounded-xl bg-blue-50 border border-blue-150 text-xs text-blue-800 leading-relaxed space-y-1">
+                    <p className="font-bold">💡 How it works:</p>
+                    <p>
+                      When a <code>DATABASE_URL</code> (Postgres) or <code>KV_REST_API_URL</code> is added to Vercel's Environment Variables, EduGrade's secure backend proxies all evaluations directly to your free cloud database. If no database is connected, EduGrade safely falls back to storing data locally inside a temporary backup file on your server (<code>data_store.json</code>).
+                    </p>
+                  </div>
+                </div>
+              </div>
+
             </div>
           </div>
         )}

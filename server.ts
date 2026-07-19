@@ -4,8 +4,154 @@ import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import { Client } from "pg";
 
 dotenv.config();
+
+// Helper to get lazy-initialized Postgres client
+async function getPostgresClient(): Promise<Client | null> {
+  const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+  if (!connectionString) return null;
+  
+  const client = new Client({
+    connectionString,
+    ssl: {
+      rejectUnauthorized: false // Necessary for Neon/Supabase cloud DB connections
+    }
+  });
+  await client.connect();
+  return client;
+}
+
+// Ensure the PostgreSQL table exists for storing data
+async function initPostgresTable() {
+  const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+  if (!connectionString) return;
+  
+  let client = null;
+  try {
+    console.log("[PostgreSQL] Checking database table...");
+    client = await getPostgresClient();
+    if (client) {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS edugrade_kv (
+          key VARCHAR(255) PRIMARY KEY,
+          value TEXT NOT NULL
+        )
+      `);
+      console.log("[PostgreSQL] Table 'edugrade_kv' is ready.");
+    }
+  } catch (err) {
+    console.error("[PostgreSQL] Error initializing database table:", err);
+  } finally {
+    if (client) {
+      try { await client.end(); } catch (e) {}
+    }
+  }
+}
+
+// Persistent Store: Save payload to Vercel KV or PostgreSQL
+async function saveToCloud(payload: any): Promise<boolean> {
+  const payloadStr = JSON.stringify(payload);
+  let saved = false;
+
+  // 1. Try Vercel KV REST API if available
+  if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
+    try {
+      console.log("[Cloud Store] Saving to Vercel KV...");
+      const res = await fetch(`${process.env.KV_REST_API_URL}/set/edu_grade_roster_data`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${process.env.KV_REST_API_TOKEN}` },
+        body: JSON.stringify(["SET", "edu_grade_roster_data", payloadStr])
+      });
+      if (res.ok) {
+        console.log("[Cloud Store] Successfully saved to Vercel KV!");
+        saved = true;
+      } else {
+        console.error("[Cloud Store] Vercel KV set returned non-ok status:", res.status);
+      }
+    } catch (err) {
+      console.error("[Cloud Store] Failed to save to Vercel KV:", err);
+    }
+  }
+
+  // 2. Try PostgreSQL if available
+  const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+  if (connectionString) {
+    let client = null;
+    try {
+      console.log("[Cloud Store] Saving to PostgreSQL database...");
+      client = await getPostgresClient();
+      if (client) {
+        await client.query(`
+          INSERT INTO edugrade_kv (key, value)
+          VALUES ('roster_data', $1)
+          ON CONFLICT (key)
+          DO UPDATE SET value = EXCLUDED.value
+        `, [payloadStr]);
+        console.log("[Cloud Store] Successfully saved to PostgreSQL!");
+        saved = true;
+      }
+    } catch (err) {
+      console.error("[Cloud Store] Failed to save to PostgreSQL:", err);
+    } finally {
+      if (client) {
+        try { await client.end(); } catch (e) {}
+      }
+    }
+  }
+
+  return saved;
+}
+
+// Persistent Store: Load payload from Vercel KV or PostgreSQL
+async function loadFromCloud(): Promise<any | null> {
+  // 1. Try Vercel KV REST API if available
+  if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
+    try {
+      console.log("[Cloud Store] Loading from Vercel KV...");
+      const res = await fetch(`${process.env.KV_REST_API_URL}/get/edu_grade_roster_data`, {
+        headers: { Authorization: `Bearer ${process.env.KV_REST_API_TOKEN}` }
+      });
+      if (res.ok) {
+        const body = await res.json();
+        if (body && body.result) {
+          console.log("[Cloud Store] Successfully loaded from Vercel KV!");
+          return JSON.parse(body.result);
+        }
+      } else {
+        console.error("[Cloud Store] Vercel KV get returned non-ok status:", res.status);
+      }
+    } catch (err) {
+      console.error("[Cloud Store] Failed to load from Vercel KV:", err);
+    }
+  }
+
+  // 2. Try PostgreSQL if available
+  const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+  if (connectionString) {
+    let client = null;
+    try {
+      console.log("[Cloud Store] Loading from PostgreSQL...");
+      client = await getPostgresClient();
+      if (client) {
+        const result = await client.query("SELECT value FROM edugrade_kv WHERE key = 'roster_data' LIMIT 1");
+        if (result && result.rows && result.rows.length > 0) {
+          console.log("[Cloud Store] Successfully loaded from PostgreSQL!");
+          return JSON.parse(result.rows[0].value);
+        }
+      }
+    } catch (err) {
+      console.error("[Cloud Store] Failed to load from PostgreSQL:", err);
+    } finally {
+      if (client) {
+        try { await client.end(); } catch (e) {}
+      }
+    }
+  }
+
+  return null;
+}
 
 function getStudentPronouns(name: string) {
   const normalized = (name || "").trim().toLowerCase();
@@ -57,6 +203,9 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // Initialize DB table if PostgreSQL is configured
+  await initPostgresTable();
+
   // Crucial parse middleware with generous limits for roster data and custom logos
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
@@ -69,15 +218,22 @@ async function startServer() {
   // Server-Side Persistent Store: Load synchronized student roster and metadata
   app.get("/api/get-data", async (req, res) => {
     try {
+      // 1. Try to load from cloud storage
+      const cloudData = await loadFromCloud();
+      if (cloudData) {
+        return res.json({ initialized: true, ...cloudData, source: "cloud" });
+      }
+
+      // 2. Fallback to local file on disk
       const dataPath = path.join(process.cwd(), "data_store.json");
       if (fs.existsSync(dataPath)) {
         const content = await fs.promises.readFile(dataPath, "utf-8");
         const parsed = JSON.parse(content);
-        return res.json({ initialized: true, ...parsed });
+        return res.json({ initialized: true, ...parsed, source: "local" });
       }
       return res.json({ initialized: false });
     } catch (err) {
-      console.error("Error reading data_store.json:", err);
+      console.error("Error reading database:", err);
       return res.status(500).json({ error: "Failed to read server database" });
     }
   });
@@ -86,7 +242,6 @@ async function startServer() {
   app.post("/api/save-data", async (req, res) => {
     try {
       const { students, schoolName, schoolMotto, schoolLogo, allowedClasses, allowedBatches } = req.body;
-      const dataPath = path.join(process.cwd(), "data_store.json");
       
       const payload = {
         students: students || [],
@@ -98,13 +253,20 @@ async function startServer() {
         lastUpdated: new Date().toISOString()
       };
       
+      // 1. Write to cloud store (Vercel KV or PostgreSQL)
+      const savedToCloud = await saveToCloud(payload);
+      
+      // 2. Always backup to local file on disk
+      const dataPath = path.join(process.cwd(), "data_store.json");
       await fs.promises.writeFile(dataPath, JSON.stringify(payload, null, 2), "utf-8");
-      return res.json({ success: true });
+      
+      return res.json({ success: true, savedToCloud });
     } catch (err) {
-      console.error("Error writing data_store.json:", err);
+      console.error("Error writing database:", err);
       return res.status(500).json({ error: "Failed to save server database" });
     }
   });
+
 
   // Server-Side Gemini API Proxy: Generate bespoke Teacher's report card comments
   app.post("/api/generate-comments", async (req, res) => {
