@@ -95,7 +95,20 @@ export const BrandingSettings: React.FC<BrandingSettingsProps> = ({
           // Determine best format and quality
           const format = file.type === "image/png" ? "image/png" : "image/jpeg";
           const quality = format === "image/jpeg" ? 0.75 : undefined; // compress JPEG slightly to keep it tiny
-          const compressedResult = canvas.toDataURL(format, quality);
+          let compressedResult = canvas.toDataURL(format, quality);
+          
+          if (format === "image/png" && compressedResult.length > 30000) {
+            const jpegCanvas = document.createElement("canvas");
+            jpegCanvas.width = width;
+            jpegCanvas.height = height;
+            const jctx = jpegCanvas.getContext("2d");
+            if (jctx) {
+              jctx.fillStyle = "#ffffff";
+              jctx.fillRect(0, 0, width, height);
+              jctx.drawImage(img, 0, 0, width, height);
+              compressedResult = jpegCanvas.toDataURL("image/jpeg", 0.75);
+            }
+          }
           
           setLogoPreview(compressedResult);
           onSchoolLogoChange(compressedResult);

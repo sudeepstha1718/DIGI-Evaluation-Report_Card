@@ -252,7 +252,23 @@ const compressImageIfNeeded = (dataUrl: string | null): Promise<string | null> =
         ctx.drawImage(img, 0, 0, width, height);
         const format = dataUrl.includes("image/png") ? "image/png" : "image/jpeg";
         const quality = format === "image/jpeg" ? 0.75 : undefined;
-        resolve(canvas.toDataURL(format, quality));
+        const compressed = canvas.toDataURL(format, quality);
+        if (format === "image/png" && compressed.length > 30000) {
+          const jpegCanvas = document.createElement("canvas");
+          jpegCanvas.width = width;
+          jpegCanvas.height = height;
+          const jctx = jpegCanvas.getContext("2d");
+          if (jctx) {
+            jctx.fillStyle = "#ffffff";
+            jctx.fillRect(0, 0, width, height);
+            jctx.drawImage(img, 0, 0, width, height);
+            resolve(jpegCanvas.toDataURL("image/jpeg", 0.75));
+          } else {
+            resolve(compressed);
+          }
+        } else {
+          resolve(compressed);
+        }
       } else {
         resolve(dataUrl);
       }
@@ -971,7 +987,21 @@ export default function App() {
           ctx.drawImage(img, 0, 0, width, height);
           const format = schoolLogo.includes("image/png") ? "image/png" : "image/jpeg";
           const quality = format === "image/jpeg" ? 0.75 : undefined;
-          const compressed = canvas.toDataURL(format, quality);
+          let compressed = canvas.toDataURL(format, quality);
+          
+          if (format === "image/png" && compressed.length > 30000) {
+            const jpegCanvas = document.createElement("canvas");
+            jpegCanvas.width = width;
+            jpegCanvas.height = height;
+            const jctx = jpegCanvas.getContext("2d");
+            if (jctx) {
+              jctx.fillStyle = "#ffffff";
+              jctx.fillRect(0, 0, width, height);
+              jctx.drawImage(img, 0, 0, width, height);
+              compressed = jpegCanvas.toDataURL("image/jpeg", 0.75);
+            }
+          }
+
           setSchoolLogo(compressed);
           localStorage.setItem("school_logo", compressed);
           setHasUnsaved(true); // Flag as unsaved so the auto-sync automatically pushes the compressed version to the server!
