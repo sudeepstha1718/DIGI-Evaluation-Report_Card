@@ -885,6 +885,43 @@ export default function App() {
     };
   }, []);
 
+  // Background self-healing image compressor:
+  // If the stored schoolLogo exceeds 200KB in character length, compress it automatically.
+  // This heals existing bloated state in browser LocalStorage without any action required.
+  useEffect(() => {
+    if (schoolLogo && schoolLogo.startsWith("data:image/") && schoolLogo.length > 200000) {
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 800;
+        let width = img.width;
+        let height = img.height;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const format = schoolLogo.includes("image/png") ? "image/png" : "image/jpeg";
+          const quality = format === "image/jpeg" ? 0.75 : undefined;
+          const compressed = canvas.toDataURL(format, quality);
+          setSchoolLogo(compressed);
+          localStorage.setItem("school_logo", compressed);
+          console.log("Automatically compressed oversized school logo background process successfully.");
+        }
+      };
+      img.src = schoolLogo;
+    }
+  }, [schoolLogo]);
+
   // Listen for storage changes in other tabs/windows to keep all views completely consistent
   useEffect(() => {
     const handleStorageChange = (e: StorageEvent) => {

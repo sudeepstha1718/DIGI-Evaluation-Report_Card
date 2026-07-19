@@ -47,21 +47,73 @@ export const BrandingSettings: React.FC<BrandingSettingsProps> = ({
       return;
     }
 
-    // Limit size to 3.5MB to ensure it fits in localStorage alongside other data
-    if (file.size > 3.5 * 1024 * 1024) {
-      setUploadError("Image is too large (Max: 3.5MB) for browser local storage.");
+    // Limit size to 15MB initially, but we will compress it down to a very small size (< 150KB)
+    if (file.size > 15 * 1024 * 1024) {
+      setUploadError("Image is too large (Max: 15MB). Please upload a smaller image file.");
       return;
     }
 
     setUploadError(null);
     const reader = new FileReader();
     reader.onload = (event) => {
-      const result = event.target?.result as string;
-      if (result) {
-        setLogoPreview(result);
-        onSchoolLogoChange(result);
+      const rawResult = event.target?.result as string;
+      if (!rawResult) return;
+
+      // If the file is already small (under 150KB) or is an SVG, keep it raw and uncompressed
+      if (file.size < 150 * 1024 || file.type === "image/svg+xml") {
+        setLogoPreview(rawResult);
+        onSchoolLogoChange(rawResult);
         triggerSuccessFeedback();
+        return;
       }
+
+      // Otherwise, downscale and compress the image to prevent high payload and network sync failures
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 800; // standard crisp dimension for logos and small page banners
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          
+          // Determine best format and quality
+          const format = file.type === "image/png" ? "image/png" : "image/jpeg";
+          const quality = format === "image/jpeg" ? 0.75 : undefined; // compress JPEG slightly to keep it tiny
+          const compressedResult = canvas.toDataURL(format, quality);
+          
+          setLogoPreview(compressedResult);
+          onSchoolLogoChange(compressedResult);
+          triggerSuccessFeedback();
+        } else {
+          // Canvas fallback
+          setLogoPreview(rawResult);
+          onSchoolLogoChange(rawResult);
+          triggerSuccessFeedback();
+        }
+      };
+      img.onerror = () => {
+        // Fallback to raw data if image loading fails (e.g. some webp formats)
+        setLogoPreview(rawResult);
+        onSchoolLogoChange(rawResult);
+        triggerSuccessFeedback();
+      };
+      img.src = rawResult;
     };
     reader.onerror = () => {
       setUploadError("Could not read file. Please try a different image.");
@@ -217,7 +269,7 @@ export const BrandingSettings: React.FC<BrandingSettingsProps> = ({
                 Drag and drop your school logo here
               </p>
               <p className="text-[10px] text-slate-500 mt-1">
-                Supports PNG, JPG, SVG or WEBP (Max 3.5MB size)
+                Supports PNG, JPG, SVG or WEBP (Max 15MB size, auto-compressed)
               </p>
               <button 
                 type="button" 
