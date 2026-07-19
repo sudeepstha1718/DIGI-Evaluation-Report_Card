@@ -59,8 +59,8 @@ export const BrandingSettings: React.FC<BrandingSettingsProps> = ({
       const rawResult = event.target?.result as string;
       if (!rawResult) return;
 
-      // If the file is already small (under 150KB) or is an SVG, keep it raw and uncompressed
-      if (file.size < 150 * 1024 || file.type === "image/svg+xml") {
+      // If the file is already small (under 20KB) or is an SVG, keep it raw and uncompressed
+      if (file.size < 20 * 1024 || file.type === "image/svg+xml") {
         setLogoPreview(rawResult);
         onSchoolLogoChange(rawResult);
         triggerSuccessFeedback();
@@ -70,7 +70,7 @@ export const BrandingSettings: React.FC<BrandingSettingsProps> = ({
       // Otherwise, downscale and compress the image to prevent high payload and network sync failures
       const img = new Image();
       img.onload = () => {
-        const maxDim = 800; // standard crisp dimension for logos and small page banners
+        const maxDim = 180; // standard crisp dimension for logos and small page banners
         let width = img.width;
         let height = img.height;
 

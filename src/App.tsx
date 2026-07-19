@@ -225,6 +225,45 @@ const isDifferent = (s1: StudentRecord, s2: StudentRecord) => {
   return false;
 };
 
+const compressImageIfNeeded = (dataUrl: string | null): Promise<string | null> => {
+  if (!dataUrl || !dataUrl.startsWith("data:image/") || dataUrl.length <= 30000) {
+    return Promise.resolve(dataUrl);
+  }
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const maxDim = 180;
+      let width = img.width;
+      let height = img.height;
+      if (width > maxDim || height > maxDim) {
+        if (width > height) {
+          height = Math.round((height * maxDim) / width);
+          width = maxDim;
+        } else {
+          width = Math.round((width * maxDim) / height);
+          height = maxDim;
+        }
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.drawImage(img, 0, 0, width, height);
+        const format = dataUrl.includes("image/png") ? "image/png" : "image/jpeg";
+        const quality = format === "image/jpeg" ? 0.75 : undefined;
+        resolve(canvas.toDataURL(format, quality));
+      } else {
+        resolve(dataUrl);
+      }
+    };
+    img.onerror = () => {
+      resolve(dataUrl);
+    };
+    img.src = dataUrl;
+  });
+};
+
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
     try {
@@ -666,6 +705,13 @@ export default function App() {
       localStorage.setItem("edugrade_last_sync_time", timeStr);
 
       // Save the resolved, merged array back to the server so database stays clean!
+      const rawLogo = tempCloudPayload.schoolLogo || schoolLogo;
+      const compressedLogo = await compressImageIfNeeded(rawLogo);
+      if (compressedLogo && compressedLogo !== schoolLogo) {
+        setSchoolLogo(compressedLogo);
+        localStorage.setItem("school_logo", compressedLogo);
+      }
+
       await fetch("/api/save-data", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -673,7 +719,7 @@ export default function App() {
           students: resolvedStudents,
           schoolName: tempCloudPayload.schoolName || schoolName,
           schoolMotto: tempCloudPayload.schoolMotto || schoolMotto,
-          schoolLogo: tempCloudPayload.schoolLogo || schoolLogo,
+          schoolLogo: compressedLogo,
           allowedClasses: tempCloudPayload.allowedClasses || ALLOWED_CLASSES,
           allowedBatches: tempCloudPayload.allowedBatches || ALLOWED_BATCHES
         })
@@ -695,6 +741,12 @@ export default function App() {
   const pushDataToServer = async (silent = false) => {
     setIsSyncing(true);
     try {
+      const compressedLogo = await compressImageIfNeeded(schoolLogo);
+      if (compressedLogo && compressedLogo !== schoolLogo) {
+        setSchoolLogo(compressedLogo);
+        localStorage.setItem("school_logo", compressedLogo);
+      }
+
       const res = await fetch("/api/save-data", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -702,7 +754,7 @@ export default function App() {
           students,
           schoolName,
           schoolMotto,
-          schoolLogo,
+          schoolLogo: compressedLogo,
           allowedClasses: ALLOWED_CLASSES,
           allowedBatches: ALLOWED_BATCHES
         })
@@ -753,6 +805,12 @@ export default function App() {
           triggerStatus("🔄 Connected and synchronized with EduGrade Master Cloud Database!");
         } else if (result === "uninitialized") {
           // Initialize server database with current local storage or defaults
+          const compressedLogo = await compressImageIfNeeded(schoolLogo);
+          if (compressedLogo && compressedLogo !== schoolLogo) {
+            setSchoolLogo(compressedLogo);
+            localStorage.setItem("school_logo", compressedLogo);
+          }
+
           const initRes = await fetch("/api/save-data", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -760,7 +818,7 @@ export default function App() {
               students,
               schoolName,
               schoolMotto,
-              schoolLogo,
+              schoolLogo: compressedLogo,
               allowedClasses: ALLOWED_CLASSES,
               allowedBatches: ALLOWED_BATCHES
             })
@@ -826,6 +884,12 @@ export default function App() {
     const delayDebounceFn = setTimeout(async () => {
       try {
         setIsSyncing(true);
+        const compressedLogo = await compressImageIfNeeded(schoolLogo);
+        if (compressedLogo && compressedLogo !== schoolLogo) {
+          setSchoolLogo(compressedLogo);
+          localStorage.setItem("school_logo", compressedLogo);
+        }
+
         const res = await fetch("/api/save-data", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -833,7 +897,7 @@ export default function App() {
             students,
             schoolName,
             schoolMotto,
-            schoolLogo,
+            schoolLogo: compressedLogo,
             allowedClasses: ALLOWED_CLASSES,
             allowedBatches: ALLOWED_BATCHES
           })
@@ -881,13 +945,13 @@ export default function App() {
   }, []);
 
   // Background self-healing image compressor:
-  // If the stored schoolLogo exceeds 200KB in character length, compress it automatically.
+  // If the stored schoolLogo exceeds 30KB in character length, compress it automatically.
   // This heals existing bloated state in browser LocalStorage without any action required.
   useEffect(() => {
-    if (schoolLogo && schoolLogo.startsWith("data:image/") && schoolLogo.length > 200000) {
+    if (schoolLogo && schoolLogo.startsWith("data:image/") && schoolLogo.length > 30000) {
       const img = new Image();
       img.onload = () => {
-        const maxDim = 800;
+        const maxDim = 180;
         let width = img.width;
         let height = img.height;
         if (width > maxDim || height > maxDim) {
@@ -910,6 +974,7 @@ export default function App() {
           const compressed = canvas.toDataURL(format, quality);
           setSchoolLogo(compressed);
           localStorage.setItem("school_logo", compressed);
+          setHasUnsaved(true); // Flag as unsaved so the auto-sync automatically pushes the compressed version to the server!
           console.log("Automatically compressed oversized school logo background process successfully.");
         }
       };
