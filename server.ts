@@ -199,9 +199,8 @@ function getStudentPronouns(name: string) {
   }
 }
 
-async function startServer() {
+export async function createExpressApp() {
   const app = express();
-  const PORT = 3000;
 
   // Initialize DB table if PostgreSQL is configured
   await initPostgresTable();
@@ -423,11 +422,20 @@ Provide your output as parsed JSON with exactly these two keys:
     console.log("Production static server configured at dist/.");
   }
 
+  return app;
+}
+
+async function startLocalServer() {
+  const app = await createExpressApp();
+  const PORT = 3000;
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`EduGrade Hub Server boot completed. Running on port ${PORT}`);
   });
 }
 
-startServer().catch((err) => {
-  console.error("Critical server boot failure:", err);
-});
+// Start listener when running directly in long-running container or local dev server
+if (process.env.NODE_ENV !== "production" || !process.env.VERCEL) {
+  startLocalServer().catch((err) => {
+    console.error("Critical server boot failure:", err);
+  });
+}
