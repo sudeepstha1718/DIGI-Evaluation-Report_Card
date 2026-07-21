@@ -573,7 +573,7 @@ export default function App() {
   const [isServerSynced, setIsServerSynced] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
-  const [dbSource, setDbSource] = useState<"cloud" | "local" | null>(null);
+  const [dbSource, setDbSource] = useState<"cloud" | "local" | "memory" | null>(null);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(() => {
     return typeof window !== "undefined" ? localStorage.getItem("edugrade_last_sync_time") : null;
   });
@@ -815,7 +815,9 @@ export default function App() {
       }
       const data = await res.json();
       setIsOffline(false);
-      if (data.savedToCloud) {
+      if (data.source) {
+        setDbSource(data.source);
+      } else if (data.savedToCloud) {
         setDbSource("cloud");
       } else {
         setDbSource("local");
@@ -885,7 +887,9 @@ export default function App() {
           const initData = await initRes.json();
           if (initData.success) {
             setIsOffline(false);
-            if (initData.savedToCloud) {
+            if (initData.source) {
+              setDbSource(initData.source);
+            } else if (initData.savedToCloud) {
               setDbSource("cloud");
             } else {
               setDbSource("local");
@@ -969,6 +973,9 @@ export default function App() {
         const data = await res.json();
         if (data.success) {
           setIsOffline(false);
+          if (data.source) {
+            setDbSource(data.source);
+          }
           setHasUnsaved(false);
           const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
           setLastSyncTime(timeStr);
@@ -2725,6 +2732,11 @@ export default function App() {
                   <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                   🌐 Internet DB Connected
                 </span>
+              ) : dbSource === "memory" ? (
+                <span className="inline-flex items-center gap-1 bg-sky-500/20 text-sky-400 px-2 py-0.5 rounded-full border border-sky-500/30 text-[9px] font-extrabold tracking-wider uppercase" title="Server is in sandbox mode. Hook up Neon database below to persist permanently!">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-sky-450 animate-pulse" />
+                  💾 Server Sandbox Mode
+                </span>
               ) : (
                 <span className="inline-flex items-center gap-1 bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full border border-amber-500/30 text-[9px] font-extrabold tracking-wider uppercase" title="Stored on Local Server Backup (data_store.json). Click 'Cloud Database Setup' to hook up your free DB.">
                   <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400" />
@@ -3214,7 +3226,7 @@ export default function App() {
                     <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/60 space-y-2 flex flex-col justify-between">
                       <div>
                         <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider block mb-1">Environment Variable</span>
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           {dbStatus.envKeys?.DATABASE_URL_present || dbStatus.envKeys?.POSTGRES_URL_present ? (
                             <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded-md border border-emerald-200">
                               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
@@ -3226,10 +3238,19 @@ export default function App() {
                               MISSING
                             </span>
                           )}
+                          {dbStatus.isDummyUrl && (
+                            <span className="inline-flex items-center gap-1 bg-red-100 text-red-800 text-[10px] font-black px-2 py-0.5 rounded-md border border-red-200 animate-bounce">
+                              ⚠️ EXAMPLE URL DETECTED
+                            </span>
+                          )}
                         </div>
                       </div>
                       <p className="text-[11px] text-slate-500 leading-relaxed mt-2">
-                        Checks if Vercel or your local server has loaded the secret connection string key (<code>DATABASE_URL</code>).
+                        {dbStatus.isDummyUrl ? (
+                          <strong className="text-red-700">⚠️ CRITICAL: You copied the placeholder dummy URL "postgres://user:pass@db.example.com..." from a setup tutorial. You must replace this with your real connection string from Neon.tech!</strong>
+                        ) : (
+                          "Checks if Vercel or your local server has loaded the secret connection string key (DATABASE_URL)."
+                        )}
                       </p>
                     </div>
 
@@ -3318,7 +3339,7 @@ export default function App() {
                           <li>Go to <a href="https://neon.tech" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline font-bold inline-flex items-center gap-0.5">neon.tech <ExternalLink className="h-3 w-3 inline" /></a> and register with GitHub or Google.</li>
                           <li>Create a new project (select the serverless free tier).</li>
                           <li>Copy the primary connection string (starts with <code>postgres://</code> or <code>postgresql://</code>).</li>
-                          <li>Add the environment variable name <strong>DATABASE_URL</strong> in your Vercel deployment project settings and paste your copied connection string.</li>
+                          <li>Add the environment variable name <strong>DATABASE_URL</strong> in your Vercel project settings, paste your copied connection string, and <strong>CRITICAL:</strong> Redeploy your Vercel project so that the changes take effect!</li>
                         </ol>
                       </div>
                     </div>

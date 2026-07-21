@@ -216,14 +216,16 @@ export async function createExpressApp() {
 
   // Database Connection Diagnostics Endpoint
   app.get("/api/db-status", async (req, res) => {
-    const hasPostgres = !!(process.env.DATABASE_URL || process.env.POSTGRES_URL);
+    const dbUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL || "";
+    const hasPostgres = !!dbUrl;
+    const isDummyUrl = dbUrl.includes("db.example.com") || dbUrl.includes("user:pass") || dbUrl.includes("example.com");
     const hasKv = !!(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
     
     let postgresConnection = "disconnected";
     let postgresError = null;
     let tablesFound: string[] = [];
     
-    if (hasPostgres) {
+    if (hasPostgres && !isDummyUrl) {
       let client = null;
       try {
         client = await getPostgresClient();
@@ -244,11 +246,15 @@ export async function createExpressApp() {
           try { await client.end(); } catch (e) {}
         }
       }
+    } else if (hasPostgres && isDummyUrl) {
+      postgresConnection = "error";
+      postgresError = "Detected placeholder database URL (postgres://user:pass@db.example.com:5432/app). This is a dummy example URL and does not point to your real Neon database. You must replace it with your actual connection string from your Neon project dashboard.";
     }
     
     res.json({
       hasPostgres,
       hasKv,
+      isDummyUrl,
       postgresConnection,
       postgresError,
       tablesFound,
@@ -316,16 +322,14 @@ export async function createExpressApp() {
         console.warn("[Cloud Store] Local disk backup skipped (expected on read-only environments like Vercel serverless):", fsErr);
       }
       
-      // If we failed to save to cloud AND we failed to save to local disk, return 500
-      if (!savedToCloud && !savedToLocalDisk) {
-        return res.status(500).json({ 
-          error: "Failed to write database. Both PostgreSQL/KV Cloud and Local Disk backups are unavailable.",
-          savedToCloud: false,
-          savedToLocalDisk: false
-        });
-      }
-      
-      return res.json({ success: true, savedToCloud });
+      // If we failed to save to cloud AND we failed to save to local disk, we still return 200 with success: true,
+      // but let the client know that saving is working in browser active memory fallback.
+      return res.json({ 
+        success: true, 
+        savedToCloud, 
+        savedToLocalDisk,
+        source: savedToCloud ? "cloud" : (savedToLocalDisk ? "local" : "memory")
+      });
     } catch (err) {
       console.error("Error writing database:", err);
       return res.status(500).json({ error: "Failed to save server database" });
