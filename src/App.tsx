@@ -414,7 +414,31 @@ export default function App() {
   const [classFilter, setClassFilter] = useState<string>("");
   const [phaseFilter, setPhaseFilter] = useState<string>("");
   const [batchFilter, setBatchFilter] = useState<string>("");
-  const [workspaceTab, setWorkspaceTab] = useState<"editor" | "report" | "branding">("editor");
+  const [workspaceTab, setWorkspaceTab] = useState<"editor" | "report" | "branding" | "database">("editor");
+  const [dbStatus, setDbStatus] = useState<any>(null);
+  const [isLoadingDbStatus, setIsLoadingDbStatus] = useState(false);
+
+  const fetchDbStatus = async () => {
+    setIsLoadingDbStatus(true);
+    try {
+      const res = await fetch("/api/db-status");
+      if (res.ok) {
+        const data = await res.json();
+        setDbStatus(data);
+      }
+    } catch (e) {
+      console.error("Failed to fetch DB status:", e);
+    } finally {
+      setIsLoadingDbStatus(false);
+    }
+  };
+
+  useEffect(() => {
+    if (workspaceTab === "database") {
+      fetchDbStatus();
+    }
+  }, [workspaceTab]);
+
   const [editorMode, setEditorMode] = useState<"matrix" | "single">("matrix");
   const [searchQuery, setSearchQuery] = useState("");
   const [parentViewMode, setParentViewMode] = useState(true); // Hide raw numbers from form by default
@@ -3156,6 +3180,109 @@ export default function App() {
                     </p>
                   </div>
                 </div>
+              </div>
+
+              {/* Live Connection Diagnostics Dashboard */}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="p-1.5 rounded-lg bg-blue-50 text-blue-600">
+                      <Settings className="h-4 w-4" />
+                    </span>
+                    <div>
+                      <h4 className="font-extrabold text-sm text-slate-800">
+                        Real-Time Cloud Diagnostics Check
+                      </h4>
+                      <p className="text-[10px] text-slate-400 mt-0.5">Test if Vercel server successfully communicates with Neon database</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={fetchDbStatus}
+                    disabled={isLoadingDbStatus}
+                    className="text-xs text-blue-600 hover:text-blue-800 font-bold flex items-center justify-center gap-1.5 cursor-pointer bg-blue-50/50 hover:bg-blue-50 px-3.5 py-2 rounded-xl border border-blue-150 transition-all shadow-2xs"
+                  >
+                    <RefreshCw className={`h-3 w-3 ${isLoadingDbStatus ? "animate-spin" : ""}`} />
+                    {isLoadingDbStatus ? "Testing database connection..." : "Test Database Connection"}
+                  </button>
+                </div>
+
+                {dbStatus ? (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+                    
+                    {/* Diagnostic 1: Connection String presence */}
+                    <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/60 space-y-2 flex flex-col justify-between">
+                      <div>
+                        <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider block mb-1">Environment Variable</span>
+                        <div className="flex items-center gap-1.5">
+                          {dbStatus.envKeys?.DATABASE_URL_present || dbStatus.envKeys?.POSTGRES_URL_present ? (
+                            <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded-md border border-emerald-200">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                              DETECTED
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 bg-amber-100 text-amber-850 text-[10px] font-black px-2 py-0.5 rounded-md border border-amber-200">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                              MISSING
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <p className="text-[11px] text-slate-500 leading-relaxed mt-2">
+                        Checks if Vercel or your local server has loaded the secret connection string key (<code>DATABASE_URL</code>).
+                      </p>
+                    </div>
+
+                    {/* Diagnostic 2: DB Connection State */}
+                    <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/60 space-y-2 col-span-1 md:col-span-2">
+                      <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider block">Database Connection Status</span>
+                      <div className="flex items-center gap-1.5">
+                        {dbStatus.postgresConnection === "connected" ? (
+                          <span className="inline-flex items-center gap-1.5 bg-emerald-100 text-emerald-800 text-[11px] font-black px-2.5 py-0.5 rounded-md border border-emerald-200">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            SUCCESSFULLY CONNECTED
+                          </span>
+                        ) : dbStatus.postgresConnection === "error" ? (
+                          <span className="inline-flex items-center gap-1.5 bg-red-100 text-red-800 text-[11px] font-black px-2.5 py-0.5 rounded-md border border-red-200">
+                            <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                            CONNECTION FAILED
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 bg-slate-100 text-slate-800 text-[11px] font-black px-2.5 py-0.5 rounded-md border border-slate-200">
+                            <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+                            NOT ATTEMPTED YET
+                          </span>
+                        )}
+                      </div>
+                      
+                      {dbStatus.postgresError ? (
+                        <div className="mt-2.5 p-3 bg-red-50 rounded-xl border border-red-150 text-[11px] font-mono text-red-800 space-y-1.5">
+                          <p className="font-bold">Error Message received from cloud database server:</p>
+                          <div className="overflow-x-auto select-all bg-white p-2 rounded-lg border border-red-200/50 max-h-[80px] text-[10px]">
+                            {dbStatus.postgresError}
+                          </div>
+                          <p className="font-sans text-[10px] text-slate-500 leading-normal">
+                            💡 <strong>Neon setup checklist:</strong> Check your Neon.tech Project Dashboard environment variables. Did you select the pooling connection string? Did you copy the <strong>entire</strong> connection string with the password? Did you save and trigger a <strong>Redeployment</strong> in Vercel so that Vercel reloads the environment?
+                          </p>
+                        </div>
+                      ) : dbStatus.postgresConnection === "connected" ? (
+                        <div className="mt-2.5 text-xs text-slate-600 leading-relaxed space-y-1">
+                          <p className="text-emerald-700 font-bold">🎉 Connection string and database table are perfectly ready!</p>
+                          <p className="text-[11px]">Database contains tables: <code className="bg-white px-1.5 py-0.5 rounded border border-slate-200 font-mono font-bold text-slate-800 text-[10px]">{dbStatus.tablesFound?.join(", ") || "none"}</code>. EduGrade is storing records safely in Neon Postgres!</p>
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-slate-500 leading-relaxed mt-1">
+                          Deploying on Vercel hides all database login credentials from the client, keeping your grades and comments completely secure.
+                        </p>
+                      )}
+                    </div>
+
+                  </div>
+                ) : (
+                  <div className="p-6 bg-slate-50 rounded-xl border border-dashed border-slate-200 text-center text-xs text-slate-500 font-medium">
+                    🔍 Click the <strong>Test Database Connection</strong> button above to run diagnostic tests on your server configuration.
+                  </div>
+                )}
               </div>
 
               {/* 100% Free Database Instructions */}

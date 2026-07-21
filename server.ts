@@ -214,6 +214,53 @@ export async function createExpressApp() {
     res.json({ status: "ok" });
   });
 
+  // Database Connection Diagnostics Endpoint
+  app.get("/api/db-status", async (req, res) => {
+    const hasPostgres = !!(process.env.DATABASE_URL || process.env.POSTGRES_URL);
+    const hasKv = !!(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+    
+    let postgresConnection = "disconnected";
+    let postgresError = null;
+    let tablesFound: string[] = [];
+    
+    if (hasPostgres) {
+      let client = null;
+      try {
+        client = await getPostgresClient();
+        if (client) {
+          postgresConnection = "connected";
+          const tableCheck = await client.query(`
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public'
+          `);
+          tablesFound = tableCheck.rows.map((r: any) => r.table_name);
+        }
+      } catch (err: any) {
+        postgresConnection = "error";
+        postgresError = err?.message || String(err);
+      } finally {
+        if (client) {
+          try { await client.end(); } catch (e) {}
+        }
+      }
+    }
+    
+    res.json({
+      hasPostgres,
+      hasKv,
+      postgresConnection,
+      postgresError,
+      tablesFound,
+      envKeys: {
+        DATABASE_URL_present: !!process.env.DATABASE_URL,
+        POSTGRES_URL_present: !!process.env.POSTGRES_URL,
+        KV_REST_API_URL_present: !!process.env.KV_REST_API_URL,
+        KV_REST_API_TOKEN_present: !!process.env.KV_REST_API_TOKEN,
+      }
+    });
+  });
+
   // Server-Side Persistent Store: Load synchronized student roster and metadata
   app.get("/api/get-data", async (req, res) => {
     try {
@@ -224,11 +271,15 @@ export async function createExpressApp() {
       }
 
       // 2. Fallback to local file on disk
-      const dataPath = path.join(process.cwd(), "data_store.json");
-      if (fs.existsSync(dataPath)) {
-        const content = await fs.promises.readFile(dataPath, "utf-8");
-        const parsed = JSON.parse(content);
-        return res.json({ initialized: true, ...parsed, source: "local" });
+      try {
+        const dataPath = path.join(process.cwd(), "data_store.json");
+        if (fs.existsSync(dataPath)) {
+          const content = await fs.promises.readFile(dataPath, "utf-8");
+          const parsed = JSON.parse(content);
+          return res.json({ initialized: true, ...parsed, source: "local" });
+        }
+      } catch (fsErr) {
+        console.warn("[Cloud Store] Could not read local backup file:", fsErr);
       }
       return res.json({ initialized: false });
     } catch (err) {
@@ -255,9 +306,24 @@ export async function createExpressApp() {
       // 1. Write to cloud store (Vercel KV or PostgreSQL)
       const savedToCloud = await saveToCloud(payload);
       
-      // 2. Always backup to local file on disk
-      const dataPath = path.join(process.cwd(), "data_store.json");
-      await fs.promises.writeFile(dataPath, JSON.stringify(payload, null, 2), "utf-8");
+      // 2. Always backup to local file on disk if possible (it will skip gracefully on read-only environments like Vercel)
+      let savedToLocalDisk = false;
+      try {
+        const dataPath = path.join(process.cwd(), "data_store.json");
+        await fs.promises.writeFile(dataPath, JSON.stringify(payload, null, 2), "utf-8");
+        savedToLocalDisk = true;
+      } catch (fsErr) {
+        console.warn("[Cloud Store] Local disk backup skipped (expected on read-only environments like Vercel serverless):", fsErr);
+      }
+      
+      // If we failed to save to cloud AND we failed to save to local disk, return 500
+      if (!savedToCloud && !savedToLocalDisk) {
+        return res.status(500).json({ 
+          error: "Failed to write database. Both PostgreSQL/KV Cloud and Local Disk backups are unavailable.",
+          savedToCloud: false,
+          savedToLocalDisk: false
+        });
+      }
       
       return res.json({ success: true, savedToCloud });
     } catch (err) {
